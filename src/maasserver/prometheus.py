@@ -11,8 +11,16 @@ __all__ = [
 from datetime import timedelta
 import json
 
+from django.http import (
+    HttpResponse,
+    HttpResponseNotFound,
+)
 from maasserver.models import Config
-from maasserver.stats import get_maas_stats
+from maasserver.stats import (
+    get_kvm_pods_stats,
+    get_maas_stats,
+    get_machines_by_architecture,
+)
 from maasserver.utils.orm import transactional
 from maasserver.utils.threads import deferToDatabase
 from provisioningserver.logger import LegacyLogger
@@ -24,6 +32,7 @@ try:
         CollectorRegistry,
         Gauge,
         push_to_gateway,
+        generate_latest,
     )
     PROMETHEUS = True
 except:
@@ -32,16 +41,69 @@ except:
 log = LegacyLogger()
 
 
+def prometheus_handler(request):
+    if not Config.objects.get_config('prometheus_enabled'):
+        return HttpResponseNotFound()
+
+    return HttpResponse(
+        content=generate_latest(get_stats_for_prometheus()),
+        content_type="text/plain")
+
+
 def get_stats_for_prometheus():
     registry = CollectorRegistry()
     stats = json.loads(get_maas_stats())
+    architectures = get_machines_by_architecture()
+    pods = get_kvm_pods_stats()
 
     # Gather counter for machines per status
     counter = Gauge(
-        "machine_status", "Number per machines per stats",
+        "machine_status", "Number of machines per status",
         ["status"], registry=registry)
     for status, machines in stats['machine_status'].items():
         counter.labels(status).set(machines)
+
+    # Gather counter for number of nodes (controllers/machine/devices)
+    counter = Gauge(
+        "nodes", "Number of nodes per type (e.g. racks, machines, etc).",
+        ["type"], registry=registry)
+    for ctype, number in stats['controllers'].items():
+        counter.labels(ctype).set(number)
+    for ctype, number in stats['nodes'].items():
+        counter.labels(ctype).set(number)
+
+    # Gather counter for networks
+    counter = Gauge(
+        "networks", "General statistics for subnets.",
+        ["type"], registry=registry)
+    for stype, number in stats['network_stats'].items():
+        counter.labels(stype).set(number)
+
+    # Gather overall amount of machine resources
+    counter = Gauge(
+        "machine_resources", "Amount of combined resources for all machines",
+        ["resource"], registry=registry)
+    for resource, value in stats['machine_stats'].items():
+        counter.labels(resource).set(value)
+
+    # Gather all stats for pods
+    counter = Gauge(
+        "kvm_pods", "General stats for KVM pods",
+        ["type"], registry=registry)
+    for resource, value in pods.items():
+        if isinstance(value, dict):
+            for r, v in value.items():
+                counter.labels("%s_%s" % (resource, r)).set(v)
+        else:
+            counter.labels(resource).set(value)
+
+    # Gather statistics for architectures
+    if len(architectures.keys()) > 0:
+        counter = Gauge(
+            "machine_arches", "Number of machines per architecture.",
+            ["arches"], registry=registry)
+        for arch, machines in architectures.items():
+            counter.labels(arch).set(machines)
 
     return registry
 

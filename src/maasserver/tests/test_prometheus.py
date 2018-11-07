@@ -5,6 +5,7 @@
 
 __all__ = []
 
+import http.client
 import json
 
 from django.db import transaction
@@ -19,6 +20,7 @@ from maasserver.testing.testcase import (
     MAASServerTestCase,
     MAASTransactionServerTestCase,
 )
+from maasserver.utils.django_urls import reverse
 from maastesting.matchers import (
     MockCalledOnce,
     MockCalledOnceWith,
@@ -31,21 +33,82 @@ from twisted.application.internet import TimerService
 from twisted.internet.defer import fail
 
 
+class TestPrometheusHandler(MAASServerTestCase):
+
+    def test_prometheus_handler_returns_http_not_found(self):
+        Config.objects.set_config('prometheus_enabled', False)
+        response = self.client.get(reverse('metrics'))
+        self.assertEqual("text/html; charset=utf-8", response["Content-Type"])
+        self.assertEquals(response.status_code, http.client.NOT_FOUND)
+
+    def test_prometheus_handler_returns_success(self):
+        Config.objects.set_config('prometheus_enabled', True)
+        self.patch(prometheus, "CollectorRegistry")
+        self.patch(prometheus, "Gauge")
+        self.patch(prometheus, "generate_latest").return_value = {}
+        response = self.client.get(reverse('metrics'))
+        self.assertEqual("text/plain", response["Content-Type"])
+        self.assertEquals(response.status_code, http.client.OK)
+
+    def test_prometheus_handler_returns_metrics(self):
+        Config.objects.set_config('prometheus_enabled', True)
+        metrics = (
+            '# HELP machine_status Number per machines per stats'
+            '# TYPE machine_status counter'
+            'machine_status={status="deployed"} 100')
+        self.patch(prometheus, "CollectorRegistry")
+        self.patch(prometheus, "Gauge")
+        self.patch(prometheus, "generate_latest").return_value = metrics
+        response = self.client.get(reverse('metrics'))
+        self.assertEqual(metrics, response.content.decode("unicode_escape"))
+
+
 class TestPrometheus(MAASServerTestCase):
 
     def test_get_stats_for_prometheus(self):
         self.patch(prometheus, "CollectorRegistry")
         self.patch(prometheus, "Gauge")
+        # general values
         values = {
             "machine_status": {
                 "random_status": 0,
             },
+            "controllers": {
+                "regions": 0,
+            },
+            "nodes": {
+                "machines": 0,
+            },
+            "network_stats": {
+                "spaces": 0,
+            },
+            "machine_stats": {
+                "total_cpus": 0,
+            },
         }
         mock = self.patch(prometheus, "get_maas_stats")
         mock.return_value = json.dumps(values)
+        # architecture
+        arches = {
+            "amd64": 0,
+            "i386": 0,
+        }
+        mock_arches = self.patch(prometheus, "get_machines_by_architecture")
+        mock_arches.return_value = arches
+        # pods
+        pods = {
+            "kvm_pods": 0,
+            "kvm_machines": 0,
+        }
+        mock_pods = self.patch(prometheus, "get_kvm_pods_stats")
+        mock_pods.return_value = pods
         get_stats_for_prometheus()
         self.assertThat(
             mock, MockCalledOnce())
+        self.assertThat(
+            mock_arches, MockCalledOnce())
+        self.assertThat(
+            mock_pods, MockCalledOnce())
 
     def test_push_stats_to_prometheus(self):
         factory.make_RegionRackController()

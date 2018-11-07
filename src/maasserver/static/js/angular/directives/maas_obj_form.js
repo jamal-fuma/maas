@@ -1,4 +1,4 @@
-/* Copyright 2016 Canonical Ltd.  This software is licensed under the
+/* Copyright 2016-2018 Canonical Ltd.  This software is licensed under the
  * GNU Affero General Public License version 3 (see the file LICENSE).
  *
  * MAAS object directive.
@@ -948,13 +948,14 @@ angular.module('MAAS').directive('maasObjField', ['$compile',
                         '<div class="p-slider__wrapper">',
                         '<input class="p-slider" type="range"',
                         'min="' + attrs.min + '" max="' + attrs.max + '" ',
-                        'value="1" step="1" id="' + attrs.key + '" ',
+                        'value="1" step="' + attrs.step + '" ',
+                        'id="' + attrs.key + '" ',
                         'data-ng-model="_slider" data-ng-disabled="',
                         '_ngDisabled()">',
                         '<input class="p-slider__input" type="text" ',
                         'maxlength="3" id="' + attrs.key + '-input" ',
-                        'data-ng-model="_slider" data-ng-disabled="',
-                        '_ngDisabled()"></div>'
+                        'data-ng-model="_slider" disabled="disabled" ',
+                        '></div>'
                     ].join(''));
                     inputElement = $compile(inputElement)(sliderScope);
 
@@ -1108,7 +1109,8 @@ angular.module('MAAS').directive('maasObjSave', function() {
         };
     });
 
-angular.module('MAAS').directive('maasObjErrors', function() {
+angular.module('MAAS').directive('maasObjErrors', ['$compile',
+    function($compile) {
         return {
             restrict: "E",
             require: ["^^maasObjForm"],
@@ -1127,13 +1129,15 @@ angular.module('MAAS').directive('maasObjErrors', function() {
                 // Called by controller to set errors.
                 scope.setErrors = function(errors) {
                     if(errors.length > 0) {
-                        angular.forEach(errors, function(error) {
-                            ul.append(
-                              '<li class="p-list__item">' +
-                              '<i class="p-icon--error"></i> ' +
-                              error + '</li>'
+                        scope.errors = errors;
+                        for(var i=0; i < scope.errors.length; i++) {
+                            ul.append($compile(
+                                  '<li class="p-list__item">' +
+                                  '<i class="p-icon--error"></i> ' +
+                                  '<span ng-bind="errors[' + i + ']"></span>' +
+                                  '</li>')(scope)
                             );
-                        });
+                        }
                     }
                 };
 
@@ -1143,7 +1147,7 @@ angular.module('MAAS').directive('maasObjErrors', function() {
                 };
             }
         };
-    });
+    }]);
 
 
 angular.module('MAAS').directive('maasObjSaving', function() {

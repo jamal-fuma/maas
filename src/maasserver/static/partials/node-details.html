@@ -15,6 +15,8 @@
                         data-ng-show="canEdit()"
                         data-ng-model="header.hostname.value"
                         data-ng-disabled="!canEdit()"
+                        data-ng-keydown="$event.keyCode == 13 && $event.preventDefault()"
+                        data-ng-keyup="$event.keyCode == 13 && saveEditHeader()"
                         data-maas-editing="editHeader()"></span>
                     <span ng-click="editHeaderDomain()" data-ng-show="!canEdit()">{$ header.hostname.value $}</span>
                     <span class="page-header__title-dot u-no-margin--top ng-hide" data-ng-show="header.editing || header.editing_domain">.</span>
@@ -108,7 +110,7 @@
                                         <ul class="p-inline-list--settings u-no-margin--left u-no-padding--left">
                                             <li class="p-inline-list__item">
                                                 <input id="installKVM" type="checkbox" data-ng-model="deployOptions.installKVM"></input>
-                                                <label for="installKVM">Install MAAS-managed KVM Pod</label>
+                                                <label for="installKVM">Register as MAAS KVM host</label>
                                             </li>
                                         </ul>
                                     </div>

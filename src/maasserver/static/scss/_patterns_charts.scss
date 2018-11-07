@@ -1,14 +1,12 @@
 @mixin patterns_charts {
   .p-chart {
+    background-color: $color--free;
     position: relative;
     overflow: hidden;
     width: 100%;
     height: 1rem;
     border-radius: 1rem;
     background-color: transparentize($color-link, .8);
-    border: 1px solid transparentize($color-link, .8);
-    margin-top: .25rem;
-    margin-bottom: .25rem;
 
     &__container {
       $nudge-value: map-get($nudges, nudge--p) * 1.5;
@@ -27,9 +25,7 @@
   .p-chart__bar--used {
     @extend .p-chart__bar;
     background-color: $color--used;
-    &:not(:last-child) {
-      border-right: 1px solid $color-x-light;
-    }
+    border-right: 1px solid $color-x-light;
   }
 
   .p-chart__bar--other {
@@ -40,7 +36,7 @@
 
   .p-chart__bar--requests {
     @extend .p-chart__bar;
-    background-color: $color-positive;
+    background-color: $color--request;
     opacity: .15;
 
     &.is-selected {
@@ -67,11 +63,11 @@
   // Key inside option selector
   %p-key-list-item--common-properties {
     display: flex;
+    flex: 1;
     padding-right: $sph-intra;
 
     &::before {
       content: "•";
-      display: inline-block;
       float: left;
       font-size: 2rem;
       line-height: map-get($line-heights, default-text);
@@ -79,12 +75,25 @@
       padding-top: map-get($nudges, nudge--p);
       width: $sp-unit;
     }
+
+    &:last-of-type {
+      text-align: right;
+      justify-content: flex-end;
+    }
   }
 
   .p-key-list__item--requests {
     @extend %p-key-list-item--common-properties;
     &::before {
       color: $color--request;
+    }
+  }
+
+  .p-key-list__item--other-requests {
+    @extend %p-key-list-item--common-properties;
+    padding-right: 0.25rem;
+    &::before {
+      color: #1aaf65;
     }
   }
 

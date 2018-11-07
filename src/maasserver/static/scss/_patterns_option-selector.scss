@@ -18,6 +18,10 @@
       }
     }
 
+    &__title {
+      padding: $spv-intra--expanded $sph-intra 0;
+    }
+
     &__input {
       @extend select;
       color: $color-dark !important;
@@ -110,7 +114,9 @@
         }
 
         @media (min-width: $breakpoint-large) {
-          width: 750px;
+          left: 0;
+          right: -126%;
+          width: auto;
         }
       }
 
@@ -173,7 +179,7 @@
       }
 
       @media (min-width: $breakpoint-large) {
-        width: 40%;
+        width: 44%;
       }
     }
 
@@ -191,7 +197,7 @@
       }
 
       @media (min-width: $breakpoint-large) {
-        width: 45%;
+        width: 25%;
       }
     }
 
@@ -200,6 +206,10 @@
 
       @media (min-width: $breakpoint-medium) {
         width: 35%;
+      }
+
+      @media (min-width: $breakpoint-large) {
+        width: 31%;
       }
     }
   }
@@ -278,35 +288,34 @@
 }
 
 // Key inside option selector
-.p-key-icon {
-  display: inline-block;
-  width: .75rem;
-  height: .75rem;
-  border-width: 1px;
-  border-style: solid;
-  border-radius: 50%;
+%p-key-icon {
+  &::before {
+    content: "•";
+    float: left;
+    font-size: 2rem;
+    line-height: map-get($line-heights, default-text);
+    margin-right: $sph-intra--condensed;
+    padding-top: map-get($nudges, nudge--p);
+    width: $sp-unit;
+  }
 }
 
 .p-key-icon--free {
-  @extend .p-key-icon;
+  @extend %p-key-icon;
   background-color: transparentize($color-link, .8);
-  border-color: transparentize($color-link, .8);
 }
 
 .p-key-icon--used {
-  @extend .p-key-icon;
+  @extend %p-key-icon;
   background-color: $color-link;
-  border-color: $color-link;
 }
 
 .p-key-icon--requests {
-  @extend .p-key-icon;
-  background-color: $color-positive;
-  border-color: $color-positive;
+  @extend %p-key-icon;
+  background-color: $color--request;
 }
 
 .p-key-icon--other {
-  @extend .p-key-icon;
-  background-color: #1baf66;
-  border-color: #1baf66;
+  @extend %p-key-icon;
+  background-color: transparentize($color--request, .8);
 }

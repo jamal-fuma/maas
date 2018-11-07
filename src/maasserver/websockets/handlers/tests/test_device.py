@@ -26,6 +26,7 @@ from maasserver.models.interface import Interface
 from maasserver.models.staticipaddress import StaticIPAddress
 from maasserver.node_action import compile_node_actions
 from maasserver.testing.factory import factory
+from maasserver.testing.fixtures import RBACForceOffFixture
 from maasserver.testing.testcase import MAASTransactionServerTestCase
 from maasserver.utils.orm import (
     reload_object,
@@ -104,6 +105,7 @@ class TestDeviceHandler(MAASTransactionServerTestCase):
             "is_boot": interface == obj.get_boot_interface(),
             "mac_address": "%s" % interface.mac_address,
             "vlan_id": interface.vlan_id,
+            "params": interface.params,
             "parents": [
                 nic.id
                 for nic in interface.parents.all()
@@ -264,7 +266,7 @@ class TestDeviceHandler(MAASTransactionServerTestCase):
         # number means regiond has to do more work slowing down its process
         # and slowing down the client waiting for the response.
         self.assertEqual(
-            queries, 19,
+            queries, 20,
             "Number of queries has changed; make sure this is expected.")
 
     @transactional
@@ -303,6 +305,9 @@ class TestDeviceHandler(MAASTransactionServerTestCase):
 
     @transactional
     def test_list_num_queries_is_the_expected_number(self):
+        # Prevent RBAC from making a query.
+        self.useFixture(RBACForceOffFixture())
+
         owner = factory.make_User()
         handler = DeviceHandler(owner, {}, None)
         self.make_devices(
@@ -321,6 +326,9 @@ class TestDeviceHandler(MAASTransactionServerTestCase):
 
     @transactional
     def test_list_num_queries_is_independent_of_num_devices(self):
+        # Prevent RBAC from making a query.
+        self.useFixture(RBACForceOffFixture())
+
         owner = factory.make_User()
         handler = DeviceHandler(owner, {}, None)
         ip_assignment = factory.pick_enum(DEVICE_IP_ASSIGNMENT_TYPE)

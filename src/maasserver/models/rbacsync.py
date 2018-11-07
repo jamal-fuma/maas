@@ -4,6 +4,7 @@
 """RBACSync objects."""
 
 __all__ = [
+    "RBACLastSync",
     "RBACSync",
 ]
 
@@ -41,13 +42,13 @@ RBAC_ACTION_CHOICES = [
 class RBACSyncManager(Manager):
     """Manager for `RBACSync` records."""
 
-    def changes(self):
-        """Returns the changes that have occurred."""
-        return list(self.order_by('id'))
+    def changes(self, resource_type):
+        """Returns the changes that have occurred for `resource_type`."""
+        return list(self.filter(resource_type=resource_type).order_by('id'))
 
-    def clear(self):
-        """Deletes all `RBACSync`."""
-        self.all().delete()
+    def clear(self, resource_type):
+        """Deletes all `RBACSync` for `resource_type`."""
+        self.filter(resource_type=resource_type).delete()
 
 
 class RBACSync(Model):
@@ -93,3 +94,17 @@ class RBACSync(Model):
     source = CharField(
         editable=False, max_length=255, null=False, blank=True,
         help_text="A brief explanation what changed.")
+
+
+class RBACLastSync(Model):
+    """ID returned after the last synchronization for each resource type."""
+
+    class Meta(DefaultMeta):
+        """Default meta."""
+
+    resource_type = CharField(
+        editable=False, max_length=255, null=False, blank=False, unique=True,
+        help_text="Resource type that as been sync'd.")
+    sync_id = CharField(
+        editable=False, max_length=255, null=False, blank=False,
+        help_text="ID returned by the RBAC service after the last sync.")

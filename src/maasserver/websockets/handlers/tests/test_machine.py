@@ -61,8 +61,13 @@ from maasserver.models.partition import (
 )
 from maasserver.node_action import compile_node_actions
 import maasserver.node_action as node_action_module
+from maasserver.rbac import (
+    FakeRBACClient,
+    rbac,
+)
 from maasserver.testing.architecture import make_usable_architecture
 from maasserver.testing.factory import factory
+from maasserver.testing.fixtures import RBACForceOffFixture
 from maasserver.testing.osystems import make_usable_osystem
 from maasserver.testing.testcase import (
     MAASServerTestCase,
@@ -483,6 +488,9 @@ class TestMachineHandler(MAASServerTestCase):
             script_result.script.hardware_type])
 
     def test_list_num_queries_is_the_expected_number(self):
+        # Prevent RBAC from making a query.
+        self.useFixture(RBACForceOffFixture())
+
         owner = factory.make_User()
         for _ in range(10):
             node = factory.make_Node(owner=owner)
@@ -542,7 +550,7 @@ class TestMachineHandler(MAASServerTestCase):
         # number means regiond has to do more work slowing down its process
         # and slowing down the client waiting for the response.
         self.assertEqual(
-            queries, 49,
+            queries, 50,
             "Number of queries has changed; make sure this is expected.")
 
     def test_trigger_update_updates_script_result_cache(self):
@@ -1147,6 +1155,7 @@ class TestMachineHandler(MAASServerTestCase):
             "is_boot": True,
             "mac_address": "%s" % interface.mac_address,
             "vlan_id": interface.vlan_id,
+            "params": interface.params,
             "parents": [
                 nic.id
                 for nic in interface.parents.all()
@@ -1167,6 +1176,7 @@ class TestMachineHandler(MAASServerTestCase):
             "is_boot": False,
             "mac_address": "%s" % interface2.mac_address,
             "vlan_id": interface2.vlan_id,
+            "params": interface2.params,
             "parents": [
                 nic.id
                 for nic in interface2.parents.all()
@@ -1198,6 +1208,7 @@ class TestMachineHandler(MAASServerTestCase):
             "is_boot": interface == node.get_boot_interface(),
             "mac_address": "%s" % interface.mac_address,
             "vlan_id": interface.vlan_id,
+            "params": interface.params,
             "parents": [
                 nic.id
                 for nic in interface.parents.all()
@@ -1237,6 +1248,7 @@ class TestMachineHandler(MAASServerTestCase):
             "is_boot": interface == node.get_boot_interface(),
             "mac_address": "%s" % interface.mac_address,
             "vlan_id": interface.vlan_id,
+            "params": interface.params,
             "parents": [
                 nic.id
                 for nic in interface.parents.all()
@@ -1248,6 +1260,36 @@ class TestMachineHandler(MAASServerTestCase):
             "links": expected_links,
             "discovered": expected_discovered,
         }, handler.dehydrate_interface(interface, node))
+
+    def test_dehydrate_interface_includes_params(self):
+        owner = factory.make_User()
+        node = factory.make_Node(owner=owner, status=NODE_STATUS.COMMISSIONING)
+        handler = MachineHandler(owner, {}, None)
+        eth0 = factory.make_Interface(INTERFACE_TYPE.PHYSICAL, node=node)
+        eth1 = factory.make_Interface(INTERFACE_TYPE.PHYSICAL, node=node)
+        bond_params = {
+            "bond_downdelay": 0,
+            "bond_lacp_rate": "slow",
+            "bond_miimon": 100,
+            "bond_mode": "balance-xor",
+            "bond_num_grat_arp": 1,
+            "bond_updelay": 0,
+            "bond_xmit_hash_policy": "layer3+4"
+        }
+        bond0 = factory.make_Interface(
+            INTERFACE_TYPE.BOND, node=node, parents=[eth0, eth1],
+            params=bond_params)
+        bridge_params = {
+            "bridge_fd": 5,
+            "bridge_stp": True
+        }
+        br_bond0 = factory.make_Interface(
+            INTERFACE_TYPE.BRIDGE, node=node, parents=[bond0],
+            params=bridge_params)
+        bond_json = handler.dehydrate_interface(bond0, node)
+        bridge_json = handler.dehydrate_interface(br_bond0, node)
+        self.assertThat(bond_json['params'], Equals(bond_params))
+        self.assertThat(bridge_json['params'], Equals(bridge_params))
 
     def test_dehydrate_interface_for_rescue_mode_node(self):
         owner = factory.make_User()
@@ -1281,6 +1323,7 @@ class TestMachineHandler(MAASServerTestCase):
             "is_boot": interface == node.get_boot_interface(),
             "mac_address": "%s" % interface.mac_address,
             "vlan_id": interface.vlan_id,
+            "params": interface.params,
             "parents": [
                 nic.id
                 for nic in interface.parents.all()
@@ -1321,6 +1364,7 @@ class TestMachineHandler(MAASServerTestCase):
             "is_boot": interface == node.get_boot_interface(),
             "mac_address": "%s" % interface.mac_address,
             "vlan_id": interface.vlan_id,
+            "params": interface.params,
             "parents": [
                 nic.id
                 for nic in interface.parents.all()
@@ -1363,6 +1407,7 @@ class TestMachineHandler(MAASServerTestCase):
             "is_boot": interface == node.get_boot_interface(),
             "mac_address": "%s" % interface.mac_address,
             "vlan_id": interface.vlan_id,
+            "params": interface.params,
             "parents": [
                 nic.id
                 for nic in interface.parents.all()
@@ -1812,6 +1857,17 @@ class TestMachineHandler(MAASServerTestCase):
     def test_get_object_raises_error_if_owner_by_another_user(self):
         user = factory.make_User()
         node = factory.make_Node(owner=factory.make_User())
+        handler = MachineHandler(user, {}, None)
+        self.assertRaises(
+            HandlerDoesNotExistError,
+            handler.get_object, {"system_id": node.system_id})
+
+    def test_get_object_returns_error_if_not_allowed(self):
+        Config.objects.set_config('rbac_url', 'http://rbac.example.com')
+        rbac._store.client = FakeRBACClient()
+        rbac._store.cleared = False  # Prevent re-creation of the client.
+        user = factory.make_User()
+        node = factory.make_Node()
         handler = MachineHandler(user, {}, None)
         self.assertRaises(
             HandlerDoesNotExistError,

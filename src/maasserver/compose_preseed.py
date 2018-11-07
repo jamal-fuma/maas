@@ -119,38 +119,37 @@ def get_archive_config(request, node, preserve_sources=False):
     archives = {}
     archives['apt'] = {}
     archives['apt']['preserve_sources_list'] = preserve_sources
-    # If disabled_components exist, build a custom list of repositories
-    if archive.disabled_components:
-        urls = ''
-        components = archive.KNOWN_COMPONENTS[:]
+    # Always generate a custom list of repositories. deb-src is enabled in the
+    # ephemeral environment due to the cloud-init template having it enabled.
+    # It is disabled in a deployed environment due to the Curtin template
+    # having it enabled.
+    urls = ''
+    components = set(archive.KNOWN_COMPONENTS)
 
+    if archive.disabled_components:
         for comp in archive.COMPONENTS_TO_DISABLE:
             if comp in archive.disabled_components:
                 components.remove(comp)
-        urls += 'deb %s $RELEASE %s\n' % (
-            archive.url, ' '.join(components))
 
-        for pocket in archive.POCKETS_TO_DISABLE:
-            if pocket not in archive.disabled_pockets:
-                urls += 'deb %s $RELEASE-%s %s\n' % (
-                    archive.url, pocket, ' '.join(components))
+    urls += 'deb %s $RELEASE %s\n' % (
+        archive.url, ' '.join(components))
+    if archive.disable_sources:
+        urls += '# '
+    urls += 'deb-src %s $RELEASE %s\n' % (
+        archive.url, ' '.join(components))
 
-        archives['apt']['sources_list'] = urls
-    else:
-        archives['apt']['primary'] = [
-            {
-                'arches': ['default'],
-                'uri': archive.url
-            }
-        ]
-        archives['apt']['security'] = [
-            {
-                'arches': ['default'],
-                'uri': archive.url
-            }
-        ]
-        if archive.disabled_pockets:
-            archives['apt']['disable_suites'] = archive.disabled_pockets
+    for pocket in archive.POCKETS_TO_DISABLE:
+        if (not archive.disabled_pockets or
+                pocket not in archive.disabled_pockets):
+            urls += 'deb %s $RELEASE-%s %s\n' % (
+                archive.url, pocket, ' '.join(components))
+            if archive.disable_sources:
+                urls += '# '
+            urls += 'deb-src %s $RELEASE-%s %s\n' % (
+                archive.url, pocket, ' '.join(components))
+
+    archives['apt']['sources_list'] = urls
+
     if apt_proxy:
         archives['apt']['proxy'] = apt_proxy
     if archive.key:
@@ -250,30 +249,34 @@ def get_enlist_archive_config(apt_proxy=None):
     # default or ports it will be disabled on both during enlistment.
     disabled_suites = set()
     disabled_components = set()
+    disable_sources = default.disable_sources or ports.disable_sources
     for repo in [default, ports]:
         disabled_suites = disabled_suites.union(repo.disabled_pockets)
         disabled_components = disabled_components.union(
             repo.disabled_components)
 
-    # If there are components or suites to disable send a sources.list template
-    # with only enabled components and suites.
-    if disabled_components or disabled_suites:
-        components = ' '.join(disabled_components.symmetric_difference(
-            default.KNOWN_COMPONENTS))
-        archives['apt']['sources_list'] = (
-            'deb $PRIMARY $RELEASE %s\n'
-            'deb-src $PRIMARY $RELEASE %s\n' % (components, components))
-        for suite in ['updates', 'backports']:
-            if suite not in disabled_suites:
-                archives['apt']['sources_list'] += (
-                    'deb $PRIMARY $RELEASE-%s %s\n'
-                    'deb-src $PRIMARY $RELEASE-%s %s\n' % (
-                        suite, components, suite, components))
-        if 'security' not in disabled_suites:
+    components = ' '.join(disabled_components.symmetric_difference(
+        default.KNOWN_COMPONENTS))
+    archives['apt']['sources_list'] = 'deb $PRIMARY $RELEASE %s\n' % components
+    if disable_sources:
+        archives['apt']['sources_list'] += '# '
+    archives['apt']['sources_list'] += (
+        'deb-src $PRIMARY $RELEASE %s\n' % components)
+    for suite in ['updates', 'backports']:
+        if suite not in disabled_suites:
             archives['apt']['sources_list'] += (
-                'deb $SECURITY $RELEASE-security %s\n'
-                'deb-src $SECURITY $RELEASE-security %s\n' % (
-                    components, components))
+                'deb $PRIMARY $RELEASE-%s %s\n' % (suite, components))
+            if disable_sources:
+                archives['apt']['sources_list'] += '# '
+            archives['apt']['sources_list'] += (
+                'deb-src $PRIMARY $RELEASE-%s %s\n' % (suite, components))
+    if 'security' not in disabled_suites:
+        archives['apt']['sources_list'] += (
+            'deb $SECURITY $RELEASE-security %s\n' % components)
+        if disable_sources:
+            archives['apt']['sources_list'] += '# '
+        archives['apt']['sources_list'] += (
+            'deb-src $SECURITY $RELEASE-security %s\n' % components)
 
     return archives
 
@@ -385,12 +388,15 @@ def get_base_preseed(node=None):
     return cloud_config
 
 
-def compose_cloud_init_preseed(request, node, token):
+def compose_debconf_cloud_init_preseed(request, node, token):
     """Compose the preseed value for a node in any state but Commissioning.
 
     Returns cloud-config that's preseeded to cloud-init via debconf (It only
     configures cloud-init in Ubuntu Classic systems. Ubuntu Core does not
-    have debconf as it is not Debian based.
+    have debconf as it is not Debian based.)
+
+    Note that this was originally for systems that installed via
+    debian-installer, but it is used to ensure full backwards compatibility.
     """
     credentials = urlencode({
         'oauth_consumer_key': token.consumer.key,
@@ -400,7 +406,6 @@ def compose_cloud_init_preseed(request, node, token):
 
     config = get_base_preseed(node)
     config.update({
-        "apt_preserve_sources_list": True,
         # Prevent the node from requesting cloud-init data on every reboot.
         # This is done so a machine does not need to contact MAAS every time
         # it reboots.
@@ -410,10 +415,6 @@ def compose_cloud_init_preseed(request, node, token):
     # This will allow cloud-init to be configured with reporting for
     # a node that has already been installed.
     config.update(get_cloud_init_reporting(request, node, token))
-    # Add APT configuration for new cloud-init (>= 0.7.7-17)
-    config.update(
-        get_archive_config(
-            request, node, preserve_sources=False))
 
     local_config_yaml = yaml.safe_dump(config)
     # this is debconf escaping
@@ -478,12 +479,11 @@ def _compose_cloud_init_preseed(
     })
     # This configures reporting for the ephemeral environment
     cloud_config.update(get_cloud_init_reporting(request, node, token))
-    # Add the system configuration information.
-    # LP: #1743966 - When deploying precise or trusty, if a custom archive
-    # with a custom key is used, create a work around to inject the key.
-    if node.distro_series in ['precise', 'trusty']:
-        cloud_config.update(
-            get_cloud_init_legacy_apt_config_to_inject_key_to_archive(node))
+    # Add legacy APT configuration for cloud-init in case the ephemeral
+    # is an older version of maas. Since precise is now deployed using
+    # the commissioning enviroment (which will either be Xenial or Bionic)
+    # then we only need the legacy config for trusty.
+    if node.distro_series == 'trusty':
         cloud_config.update(get_old_archive_config())
         # apt_proxy is deprecated in the cloud-init source code in favor of
         # what get_archive_config does.
@@ -491,6 +491,10 @@ def _compose_cloud_init_preseed(
             request, node.get_boot_rack_controller())
         if apt_proxy:
             cloud_config['apt_proxy'] = apt_proxy
+        # LP: #1743966 - If a custom archive is being used with a custom key,
+        # create a work around to inject it in legacy format.
+        cloud_config.update(
+            get_cloud_init_legacy_apt_config_to_inject_key_to_archive(node))
     # Add APT configuration for new cloud-init (>= 0.7.7-17)
     cloud_config.update(get_archive_config(
         request, node, preserve_sources=False))
@@ -578,7 +582,7 @@ def compose_preseed(request, preseed_type, node):
         if preseed_type == PRESEED_TYPE.CURTIN:
             return compose_curtin_preseed(request, node, token)
         else:
-            return compose_cloud_init_preseed(request, node, token)
+            return compose_debconf_cloud_init_preseed(request, node, token)
 
 
 def compose_enlistment_preseed(

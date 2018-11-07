@@ -304,7 +304,7 @@ class BMC(CleanSave, TimestampedModel):
         if new_ip and new_ip.startswith('[') and new_ip.endswith(']'):
             new_ip = new_ip[1:-1]
         if new_ip != current_ip:
-            if new_ip is None:
+            if not new_ip:
                 self.ip_address = None
             else:
                 # Update or create a StaticIPAddress for the new IP.
@@ -326,6 +326,7 @@ class BMC(CleanSave, TimestampedModel):
                     maaslog.info(
                         "BMC could not save extracted IP "
                         "address '%s': '%s'", new_ip, error)
+                    raise error
 
     @staticmethod
     def scope_power_parameters(power_type, power_params):
@@ -552,7 +553,7 @@ class Pod(BMC):
 
     def check_over_commit_ratios(self, requested_cores, requested_memory):
         """Checks that requested cpu cores and memory are within the
-        currently available resources capped by the over commit ratios."""
+        currently available resources capped by the overcommit ratios."""
         message = ''
         used_cores = self.get_used_cores()
         used_memory = self.get_used_memory()
@@ -562,13 +563,13 @@ class Pod(BMC):
         potential_memory = used_memory + requested_memory
         if (over_commit_cores - potential_cores) < 0:
             message = (
-                "CPU over commit ratio is %s and there are %s "
+                "CPU overcommit ratio is %s and there are %s "
                 "available resources; %s requested." % (
                     self.cpu_over_commit_ratio, (self.cores - used_cores),
                     requested_cores))
         if (over_commit_memory - potential_memory) < 0:
             message += (
-                "Memory over commit ratio is %s and there are %s "
+                "Memory overcommit ratio is %s and there are %s "
                 "available resources; %s requested." % (
                     self.memory_over_commit_ratio,
                     (self.memory - used_memory), requested_memory))

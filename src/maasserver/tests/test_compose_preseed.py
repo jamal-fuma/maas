@@ -283,24 +283,37 @@ class TestComposePreseed(MAASServerTestCase):
             }))
 
     def assertAptConfig(self, config, apt_proxy):
+        archive = PackageRepository.objects.get_default_archive('amd64')
+        components = set(archive.KNOWN_COMPONENTS)
+
+        if archive.disabled_components:
+            for comp in archive.COMPONENTS_TO_DISABLE:
+                if comp in archive.disabled_components:
+                    components.remove(comp)
+
+        components = ' '.join(components)
+        sources_list = 'deb %s $RELEASE %s\n' % (archive.url, components)
+        if archive.disable_sources:
+            sources_list += '# '
+        sources_list += 'deb-src %s $RELEASE %s\n' % (archive.url, components)
+
+        for pocket in archive.POCKETS_TO_DISABLE:
+            if pocket in archive.disabled_pockets:
+                continue
+            sources_list += (
+                'deb %s $RELEASE-%s %s\n' % (
+                    archive.url, pocket, components))
+            if archive.disable_sources:
+                sources_list += '# '
+            sources_list += (
+                'deb-src %s $RELEASE-%s %s\n' % (
+                    archive.url, pocket, components))
+
         self.assertThat(config, ContainsDict({
             'apt': ContainsDict({
                 'preserve_sources_list': Equals(False),
-                'primary': MatchesListwise([
-                    MatchesDict({
-                        "arches": Equals(["default"]),
-                        "uri": Equals(
-                            PackageRepository.get_main_archive().url),
-                    }),
-                ]),
                 'proxy': Equals(apt_proxy),
-                'security': MatchesListwise([
-                    MatchesDict({
-                        "arches": Equals(["default"]),
-                        "uri": Equals(
-                            PackageRepository.get_main_archive().url),
-                    }),
-                ]),
+                'sources_list': Equals(sources_list),
             })
         }))
 
@@ -645,7 +658,7 @@ class TestComposePreseed(MAASServerTestCase):
         self.assertNotIn('proxy', preseed['apt'])
 
     # LP: #1743966 - Test for archive key work around
-    def test_compose_preseed_for_curtin_and_trusty_precise_aptsources(self):
+    def test_compose_preseed_for_curtin_and_trusty_aptsources(self):
         # Disable boot source cache signals.
         self.addCleanup(bootsources.signals.enable)
         bootsources.signals.disable()
@@ -653,7 +666,7 @@ class TestComposePreseed(MAASServerTestCase):
         rack_controller = factory.make_RackController()
         node = factory.make_Node(
             interface=True, status=NODE_STATUS.READY, osystem='ubuntu',
-            distro_series=random.choice(['precise', 'trusty']))
+            distro_series='trusty')
         nic = node.get_boot_interface()
         nic.vlan.dhcp_on = True
         nic.vlan.primary_rack = rack_controller
@@ -668,8 +681,10 @@ class TestComposePreseed(MAASServerTestCase):
         self.assertEqual(apt_proxy, preseed['apt_proxy'])
         self.assertSystemInfo(preseed)
 
-    # LP: #1743966 - Test for archive key work around
-    def test_compose_preseed_for_curtin_xenial_not_aptsources(self):
+    # LP: #1743966 - Precise is now deployed on a commissioning environment
+    # (e.g. Xenial/Bionic), so it no longer needs the workaround that
+    # the bug report addresses.
+    def test_compose_preseed_for_curtin_precise_not_aptsources(self):
         # Disable boot source cache signals.
         self.addCleanup(bootsources.signals.enable)
         bootsources.signals.disable()
@@ -677,7 +692,7 @@ class TestComposePreseed(MAASServerTestCase):
         rack_controller = factory.make_RackController()
         node = factory.make_Node(
             interface=True, status=NODE_STATUS.READY, osystem='ubuntu',
-            distro_series='xenial')
+            distro_series='precise')
         nic = node.get_boot_interface()
         nic.vlan.dhcp_on = True
         nic.vlan.primary_rack = rack_controller
@@ -850,7 +865,7 @@ class TestComposePreseed(MAASServerTestCase):
                 }))
         self.assertItemsEqual(
             set([
-                'deb', 'deb-src', '$PRIMARY', '$RELEASE', 'multiverse',
+                '#', 'deb', 'deb-src', '$PRIMARY', '$RELEASE', 'multiverse',
                 'restricted', 'universe', 'main'
             ]), set(preseed['apt']['sources_list'].split()))
 
